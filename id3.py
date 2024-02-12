@@ -1,6 +1,7 @@
 import csv
 import math
 import json
+import argparse
 
 
 def load_data(filename):
@@ -33,7 +34,7 @@ def information_gain(data, attribute):
             attribute_values[attribute_value] = []
         attribute_values[attribute_value].append(entry)
 
-        class_value = entry["Class"]
+        class_value = entry[class_name]
         if class_value not in class_counts:
             class_counts[class_value] = 0
         class_counts[class_value] += 1
@@ -47,7 +48,11 @@ def information_gain(data, attribute):
             * entropy(
                 {
                     class_value: len(
-                        [entry for entry in value_data if entry["Class"] == class_value]
+                        [
+                            entry
+                            for entry in value_data
+                            if entry[class_name] == class_value
+                        ]
                     )
                     for class_value in class_counts.keys()
                 }
@@ -60,7 +65,7 @@ def information_gain(data, attribute):
 def plurality_value(data):
     class_counts = {}
     for entry in data:
-        class_value = entry["Class"]
+        class_value = entry[class_name]
         if class_value not in class_counts:
             class_counts[class_value] = 0
         class_counts[class_value] += 1
@@ -73,8 +78,8 @@ def decision_tree_learning(examples, attributes, parent_examples=None):
         return {
             plurality_value(parent_examples)[0]: plurality_value(parent_examples)[1]
         }
-    elif all(entry["Class"] == examples[0]["Class"] for entry in examples):
-        return {examples[0]["Class"]: len(examples)}
+    elif all(entry[class_name] == examples[0][class_name] for entry in examples):
+        return {examples[0][class_name]: len(examples)}
     elif not attributes:
         return {plurality_value(examples)[0]: plurality_value(examples)[1]}
     else:
@@ -100,16 +105,78 @@ def print_json(tree):
     print(json.dumps(tree, indent=4))
 
 
-# Carregando os dados do arquivo CSV
-data = load_data("data/restaurant.csv")
+# Define the command-line arguments
+parser = argparse.ArgumentParser(description="Decision Tree Learning")
+parser.add_argument(
+    "--problem",
+    choices=["restaurants", "weather"],
+    help="Problem to solve",
+    default="restaurants",
+)
 
-# Obtendo os nomes dos atributos (exceto 'ID' e 'Class')
-attributes = list(data[0].keys())
-attributes.remove("ID")
-attributes.remove("Class")
+# Parse the command-line arguments
+args = parser.parse_args()
+
+# Load data based on the specified problem
+if args.problem == "restaurants":
+    data = load_data("data/restaurant.csv")
+    # Obtendo os nomes dos atributos (exceto 'ID' e 'Class')
+    attributes = list(data[0].keys())
+    attributes.remove("ID")
+    attributes.remove("Class")
+    class_name = "Class"
+elif args.problem == "weather":
+    data = load_data("data/weather.csv")
+    attributes = list(data[0].keys())
+    attributes.remove("ID")
+    attributes.remove("Play")
+    class_name = "Play"
+
 
 # Executando o algoritmo de aprendizado da árvore de decisão
 decision_tree = decision_tree_learning(data, attributes)
 
+
+def count_int_values(tree, counts={}):
+    for key, value in tree.items():
+        if isinstance(value, int):
+            counts[key] = counts.get(key, 0) + value
+        elif isinstance(value, dict):
+            # Recursively count integer values in nested dictionaries
+            count_int_values(value, counts)
+    return counts
+
+
+def predict_class(decision_tree, instance):
+    key = next(iter(decision_tree))
+    # print(key)
+    if isinstance(decision_tree[key], int):
+        # print(key)
+        return key
+    attribute_value = instance.get(key)
+    subtree = decision_tree[key].get(attribute_value)
+    if subtree is None:
+        counts = count_int_values(decision_tree)
+        return max(counts, key=counts.get)
+    return predict_class(subtree, instance)
+
+
+def predict_classes(decision_tree, instances):
+    predictions = []
+    for instance in instances:
+        predicted_class = predict_class(decision_tree, instance)
+        predictions.append(predicted_class)
+    return predictions
+
+
 # Exibindo a árvore de decisão no formato JSON
 print_json(decision_tree)
+
+new_instances = load_data("data/restaurant_new_instances.csv")
+
+# Prevendo a classe para cada nova instância
+predictions = predict_classes(decision_tree, new_instances)
+
+# Exibindo as previsões
+for instance, prediction in zip(new_instances, predictions):
+    print(f"Instance: {instance}, Predicted Class: {prediction}")
