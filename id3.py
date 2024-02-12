@@ -23,7 +23,7 @@ def entropy(class_counts):
     return entropy
 
 
-def information_gain(data, attribute):
+def information_gain(data, attribute, class_name):
     attribute_values = {}
     class_counts = {}
     total_count = 0
@@ -62,7 +62,7 @@ def information_gain(data, attribute):
     return entropy(class_counts) - remainder
 
 
-def plurality_value(data):
+def plurality_value(data, class_name):
     class_counts = {}
     for entry in data:
         class_value = entry[class_name]
@@ -73,18 +73,25 @@ def plurality_value(data):
     return max_class, class_counts[max_class]
 
 
-def decision_tree_learning(examples, attributes, parent_examples=None):
+def decision_tree_learning(examples, attributes, class_name, parent_examples=None):
     if not examples:
         return {
-            plurality_value(parent_examples)[0]: plurality_value(parent_examples)[1]
+            plurality_value(parent_examples, class_name)[0]: plurality_value(
+                parent_examples, class_name
+            )[1]
         }
     elif all(entry[class_name] == examples[0][class_name] for entry in examples):
         return {examples[0][class_name]: len(examples)}
     elif not attributes:
-        return {plurality_value(examples)[0]: plurality_value(examples)[1]}
+        return {
+            plurality_value(examples, class_name)[0]: plurality_value(
+                examples, class_name
+            )[1]
+        }
     else:
         importance_scores = {
-            attribute: information_gain(examples, attribute) for attribute in attributes
+            attribute: information_gain(examples, attribute, class_name)
+            for attribute in attributes
         }
         best_attribute = max(importance_scores, key=importance_scores.get)
         tree = {}
@@ -95,6 +102,7 @@ def decision_tree_learning(examples, attributes, parent_examples=None):
             subtree = decision_tree_learning(
                 value_examples,
                 [attr for attr in attributes if attr != best_attribute],
+                class_name,
                 examples,
             )
             tree[value] = subtree
@@ -103,38 +111,6 @@ def decision_tree_learning(examples, attributes, parent_examples=None):
 
 def print_json(tree):
     print(json.dumps(tree, indent=4))
-
-
-# Define the command-line arguments
-parser = argparse.ArgumentParser(description="Decision Tree Learning")
-parser.add_argument(
-    "--problem",
-    choices=["restaurants", "weather"],
-    help="Problem to solve",
-    default="restaurants",
-)
-
-# Parse the command-line arguments
-args = parser.parse_args()
-
-# Load data based on the specified problem
-if args.problem == "restaurants":
-    data = load_data("data/restaurant.csv")
-    # Obtendo os nomes dos atributos (exceto 'ID' e 'Class')
-    attributes = list(data[0].keys())
-    attributes.remove("ID")
-    attributes.remove("Class")
-    class_name = "Class"
-elif args.problem == "weather":
-    data = load_data("data/weather.csv")
-    attributes = list(data[0].keys())
-    attributes.remove("ID")
-    attributes.remove("Play")
-    class_name = "Play"
-
-
-# Executando o algoritmo de aprendizado da árvore de decisão
-decision_tree = decision_tree_learning(data, attributes)
 
 
 def count_int_values(tree, counts={}):
@@ -149,9 +125,7 @@ def count_int_values(tree, counts={}):
 
 def predict_class(decision_tree, instance):
     key = next(iter(decision_tree))
-    # print(key)
     if isinstance(decision_tree[key], int):
-        # print(key)
         return key
     attribute_value = instance.get(key)
     subtree = decision_tree[key].get(attribute_value)
@@ -169,14 +143,79 @@ def predict_classes(decision_tree, instances):
     return predictions
 
 
-# Exibindo a árvore de decisão no formato JSON
-print_json(decision_tree)
+def discretize_temp(temp):
+    if temp <= 60:
+        return "<=60"
+    elif 61 <= temp <= 70:
+        return "61-70"
+    elif 71 <= temp <= 80:
+        return "71-80"
+    elif 81 <= temp <= 90:
+        return "81-90"
+    else:
+        return ">=91"
 
-new_instances = load_data("data/restaurant_new_instances.csv")
 
-# Prevendo a classe para cada nova instância
-predictions = predict_classes(decision_tree, new_instances)
+def discretize_humidity(humidity):
+    if humidity <= 70:
+        return "<=70"
+    elif 71 <= humidity <= 80:
+        return "71-80"
+    else:
+        return ">=81"
 
-# Exibindo as previsões
-for instance, prediction in zip(new_instances, predictions):
-    print(f"Instance: {instance}, Predicted Class: {prediction}")
+
+if __name__ == "__main__":
+    # Define the command-line arguments
+    parser = argparse.ArgumentParser(description="Decision Tree Learning")
+    parser.add_argument(
+        "--problem",
+        choices=["restaurants", "weather"],
+        help="Problem to solve",
+        default="restaurants",
+    )
+    parser.add_argument(
+        "--predict-file",
+        help="File containing instances to predict (optional)",
+        default=None,
+    )
+
+    # Parse the command-line arguments
+    args = parser.parse_args()
+
+    # Load data based on the specified problem
+    filename = (
+        "data/restaurant.csv" if args.problem == "restaurants" else "data/weather.csv"
+    )
+    class_name = "Class" if args.problem == "restaurants" else "Play"
+    data = load_data(filename)
+
+    attributes = list(data[0].keys())
+    attributes.remove(class_name)
+    attributes.remove("ID")
+
+    if args.problem == "weather":
+        for entry in data:
+            # Pré-processar 'Temp' e 'Humidity' para agrupá-los em blocos
+            entry["Temp"] = discretize_temp(int(entry["Temp"]))
+            entry["Humidity"] = discretize_humidity(int(entry["Humidity"]))
+
+    # Executing the decision tree learning algorithm
+    decision_tree = decision_tree_learning(data, attributes, class_name)
+
+    # Printing the decision tree in JSON format
+    print_json(decision_tree)
+
+    # Predicting the class for each new instance if a prediction file is provided
+    if args.predict_file:
+        new_instances = load_data(args.predict_file)
+        if args.problem == "weather":
+            for entry in new_instances:
+                # Pré-processar 'Temp' e 'Humidity' para agrupá-los em blocos
+                entry["Temp"] = discretize_temp(int(entry["Temp"]))
+                entry["Humidity"] = discretize_humidity(int(entry["Humidity"]))
+        predictions = predict_classes(decision_tree, new_instances)
+
+        # Displaying the predictions
+        for instance, prediction in zip(new_instances, predictions):
+            print(f"Instance: {instance}, Predicted Class: {prediction}")
